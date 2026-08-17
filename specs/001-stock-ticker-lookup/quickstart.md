@@ -1,4 +1,4 @@
-# Quickstart: Validating Stock Ticker Lookup
+# Quickstart: Validating Crypto Ticker Lookup
 
 Prerequisites: dependencies from `requirements.txt` installed; run from the repo
 root (`crypto_watcher/`).
@@ -13,17 +13,17 @@ Open the app in a browser (the URL/port `app.py` prints on startup).
 
 ## 2. User Story 2 — reach the page from the main page
 
-1. On the main page, confirm a clearly labeled button/link for the stock lookup
+1. On the main page, confirm a clearly labeled button/link for the crypto lookup
    feature is visible (FR-001).
-2. Click it and confirm you land on the new ticker lookup page.
+2. Click it and confirm you land on the new ticker lookup page (`/crypto`).
 
 **Pass condition**: SC-001 — reaching a price + recommendation from the main page
 takes 3 clicks or fewer (nav button → enter ticker → submit).
 
 ## 3. User Story 1 — happy path
 
-1. On the lookup page, enter a known, actively traded ticker (e.g., `AAPL`) and
-   submit.
+1. On the lookup page, enter a known, actively traded ticker (e.g., `BTC` or
+   `ETH`) and submit.
 2. Confirm a loading indicator appears immediately (FR-006), then is replaced by a
    price and a Buy/Sell/Hold recommendation (FR-003, FR-004).
 3. Enter a second, different valid ticker and submit again without reloading the
@@ -76,3 +76,17 @@ width.
    invalid tickers) without reloading the page.
 
 **Pass condition**: SC-004 — all 10 complete without needing a page reload.
+
+## 8. Recommendation consistency (crypto-specific — validates research.md's reuse decision)
+
+1. Run a scan from the main page and note a coin's `signal`/`long_term_signal` and
+   `quick_win_score`/`long_term_score` from the results (or `/history`).
+2. Immediately look up that same ticker on the crypto lookup page.
+3. Confirm the lookup's Buy/Sell/Hold recommendation is consistent with the scan's
+   scores for that coin, using the same `MIN_BUY_SCORE`/`MIN_SELL_SCORE` thresholds
+   (small differences are expected if time has passed and the market moved between
+   the scan and the lookup — the point is that both use the same evaluation logic,
+   not that they must be numerically identical to the second).
+
+**Pass condition**: FR-005 — the recommendation reflects the same evaluation
+criteria the scanner uses elsewhere in the app.

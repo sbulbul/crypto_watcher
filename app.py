@@ -20,6 +20,7 @@ from scalper import (
     start_scalper,
     stop_scalper,
 )
+from crypto_lookup import lookup_ticker
 from storage import (
     delete_all_scans,
     delete_scan,
@@ -629,6 +630,16 @@ def reset():
         })
 
     return redirect(url_for("home"))
+
+
+@app.route("/crypto")
+def crypto_page():
+    return render_template("crypto.html")
+
+
+@app.route("/crypto_lookup")
+def crypto_lookup_route():
+    return jsonify(lookup_ticker(request.args.get("ticker", "")))
 
 
 @app.route("/history")

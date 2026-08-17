@@ -181,6 +181,16 @@ def init_db():
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_scan_results_ticker ON scan_results(ticker)"
         )
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS ticker_lookups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL,
+                price REAL NOT NULL,
+                price_type TEXT NOT NULL,
+                recommendation TEXT NOT NULL,
+                looked_up_at REAL NOT NULL
+            )
+        """)
 
 
 def save_scan(limit, universe_count, results, started_at, completed_at=None, status="completed"):
@@ -372,6 +382,32 @@ def delete_all_scans():
     with get_connection() as conn:
         conn.execute("DELETE FROM scan_results")
         conn.execute("DELETE FROM scans")
+
+
+def save_ticker_lookup(ticker, price, price_type, recommendation, looked_up_at):
+    init_db()
+    with get_connection() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO ticker_lookups (
+                ticker, price, price_type, recommendation, looked_up_at
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (ticker, price, price_type, recommendation, looked_up_at),
+        )
+        return cursor.lastrowid
+
+
+def list_ticker_lookups(limit=10):
+    init_db()
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM ticker_lookups ORDER BY looked_up_at DESC, id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+
+    return [dict(row) for row in rows]
 
 
 def fetch_latest_price(ticker):

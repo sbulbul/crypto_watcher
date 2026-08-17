@@ -771,6 +771,60 @@ button:disabled {
     margin-top: 18px;
 }
 
+/* Stock ticker lookup page */
+
+.lookup-result .card-main {
+    min-width: 0;
+}
+
+.lookup-result .ticker-block,
+.lookup-result .ticker-block h3,
+.lookup-result .signal {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.recommendation-badge {
+    flex: 0 0 auto;
+    min-width: 92px;
+    max-width: 100%;
+    text-align: right;
+    font-size: 26px;
+    font-weight: 900;
+    overflow-wrap: anywhere;
+}
+
+.recommendation-badge.buy {
+    color: var(--green);
+}
+
+.recommendation-badge.sell {
+    color: var(--red);
+}
+
+.recommendation-badge.hold {
+    color: var(--amber);
+}
+
+.lookup-stat-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.lookup-stat-row strong {
+    overflow-wrap: anywhere;
+}
+
+.save-warning {
+    margin: 10px 0 0;
+    color: var(--amber);
+    font-size: 13px;
+    font-weight: 700;
+}
+
+#warningText {
+    overflow-wrap: anywhere;
+}
+
 @media (max-width: 720px) {
     .shell {
         width: min(100% - 20px, 1180px);
