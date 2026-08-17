@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Paper Trader - Crypto Hourly Watcher</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<main class="shell">
+    <header class="topbar">
+        <div>
+            <p class="eyebrow">Simulated account</p>
+            <h1>Paper Trader</h1>
+        </div>
+        <div class="header-actions">
+            <a class="reset-button" href="{{ url_for('home') }}">Dashboard</a>
+            <a class="reset-button" href="{{ url_for('history') }}">History</a>
+            <a class="reset-button" href="{{ url_for('scalper') }}">Scalper</a>
+            <a class="reset-button" href="{{ url_for('export_paper') }}">Export Trades</a>
+        </div>
+    </header>
+
+    <section class="control-panel">
+        <form action="{{ url_for('start_paper') }}" method="post">
+            <label for="scan_limit">Paper scan limit</label>
+            <input id="scan_limit" type="number" name="scan_limit" value="{{ paper.state.scan_limit }}" min="1000" max="1000" step="1000">
+            <button type="submit" {% if paper.state.running %}disabled{% endif %}>Start Paper Trading</button>
+            <button class="danger-button" formaction="{{ url_for('stop_paper') }}" type="submit" {% if not paper.state.running %}disabled{% endif %}>Stop</button>
+            <button class="danger-button" formaction="{{ url_for('reset_paper') }}" type="submit" onclick="return confirm('Reset paper account to $5,000 and delete simulated trades?');">Reset</button>
+        </form>
+
+        <div class="paper-status">
+            <span>Status <strong>{{ paper.state.status }}</strong></span>
+            <span>Last scan <strong>{{ paper.state.last_scan_at|fmt_time }}</strong></span>
+            <span>Last price check <strong>{{ paper.state.last_tick_at|fmt_time }}</strong></span>
+            <span>Next scan <strong>{{ paper.state.next_scan_at|fmt_time }}</strong></span>
+            <span>Last candidates <strong>{{ paper.state.last_candidates }}</strong></span>
+            <span>Scan pool <strong>{{ paper.state.last_eligible }}</strong></span>
+            <span>Watching now <strong>{{ paper.state.watching or 0 }}</strong></span>
+            <span>Live opened <strong>{{ paper.state.last_live_opened or 0 }}</strong></span>
+            <span>Live rejected <strong>{{ paper.state.last_live_rejected or 0 }}</strong></span>
+            {% if paper.state.error %}
+                <span class="loss">Error <strong>{{ paper.state.error }}</strong></span>
+            {% endif %}
+        </div>
+    </section>
+
+    {% if paper.state.last_rejections %}
+        <section class="history-panel">
+            <div class="section-heading">
+                <h2>Last Scan Filters</h2>
+                <span>Why candidates did not become paper trades</span>
+            </div>
+            <div class="paper-rules">
+                {% for reason, count in paper.state.last_rejections.items() %}
+                    <span>{{ reason }} <strong>{{ count }}</strong></span>
+                {% endfor %}
+            </div>
+        </section>
+    {% endif %}
+
+    <section class="summary-grid">
+        <div>
+            <span class="metric-label">Equity</span>
+            <strong>{{ paper.equity|fmt_price }}</strong>
+        </div>
+        <div>
+            <span class="metric-label">Cash</span>
+            <strong>{{ paper.account.cash|fmt_price }}</strong>
+        </div>
+        <div>
+            <span class="metric-label">Open value</span>
+            <strong>{{ paper.open_value|fmt_price }}</strong>
+        </div>
+        <div>
+            <span class="metric-label">Unrealized P/L</span>
+            <strong class="{% if paper.unrealized_pnl >= 0 %}gain-text{% else %}loss-text{% endif %}">{{ paper.unrealized_pnl|fmt_money_exact }}</strong>
+        </div>
+        <div>
+            <span class="metric-label">Realized P/L</span>
+            <strong class="{% if paper.account.realized_pnl >= 0 %}gain-text{% else %}loss-text{% endif %}">{{ paper.account.realized_pnl|fmt_money_exact }}</strong>
+        </div>
+        <div>
+            <span class="metric-label">Total return</span>
+            <strong class="{% if paper.total_return_pct >= 0 %}gain-text{% else %}loss-text{% endif %}">{{ paper.total_return_pct|fmt_pct }}</strong>
+        </div>
+    </section>
+
+    <section class="history-panel">
+        <div class="section-heading">
+            <h2>Rules</h2>
+            <span>Targets activate profit protection; winners can keep running</span>
+        </div>
+        <div class="paper-rules">
+            <span>Starting cash <strong>{{ paper.rules.starting_cash|fmt_price }}</strong></span>
+            <span>Safety max <strong>{{ paper.rules.max_hold_minutes }} min</strong></span>
+            <span>Stale exit <strong>{{ paper.rules.stale_exit_minutes }} min</strong></span>
+            <span>Fast fail <strong>{{ paper.rules.fast_fail_minutes }} min</strong></span>
+            <span>Scan interval <strong>{{ paper.rules.scan_interval_minutes }} min</strong></span>
+            <span>Price check <strong>{{ paper.rules.price_poll_seconds }} sec</strong></span>
+            <span>Max open <strong>{{ paper.rules.max_open_positions }}</strong></span>
+            <span>Target open <strong>{{ paper.rules.min_desired_open_positions }}+</strong></span>
+            <span>Universe <strong>{% if paper.rules.focused_universe %}Focused{% else %}Broad{% endif %}</strong></span>
+            <span>Broker <strong>{{ paper.rules.broker }}</strong></span>
+            <span>Tier <strong>{{ paper.rules.wealthsimple_tier }}</strong></span>
+            <span>Trading fee <strong>{{ paper.rules.wealthsimple_trading_fee_pct|fmt_pct }}</strong></span>
+            <span>Round trip cost <strong>{{ paper.rules.estimated_round_trip_cost_pct|fmt_pct }}</strong></span>
+            <span>Max position <strong>{{ paper.rules.max_position_usd|fmt_price }}</strong></span>
+            <span>Min position <strong>{{ paper.rules.min_position_usd|fmt_price }}</strong></span>
+            <span>Cash reserve <strong>{{ paper.rules.cash_reserve_usd|fmt_price }}</strong></span>
+            <span>Min buy score <strong>{{ paper.rules.buy_min_score }}</strong></span>
+            <span>Min target <strong>{{ paper.rules.min_target_profit_pct }}%</strong></span>
+            <span>Max loss <strong>{{ paper.rules.max_scalp_loss_pct|fmt_pct }}</strong></span>
+            <span>Success at <strong>{{ paper.rules.success_return_pct|fmt_pct }}</strong></span>
+            <span>Capture at <strong>{{ paper.rules.quick_profit_exit_pct|fmt_pct }}</strong></span>
+            <span>Trail starts <strong>{{ paper.rules.micro_profit_trail_pct|fmt_pct }}</strong></span>
+            <span>Loss exits <strong>{% if paper.rules.win_only_exit_mode %}Off{% else %}On{% endif %}</strong></span>
+            <span>Entry check <strong>Weighted 5m score</strong></span>
+            {% if paper.state.market_regime %}
+                <span>Market <strong>{% if paper.state.market_regime.tradable %}Tradable{% else %}Weak{% endif %}</strong></span>
+            {% endif %}
+        </div>
+    </section>
+
+    <section class="summary-grid">
+        <div>
+            <span class="metric-label">Closed trades</span>
+            <strong>{{ paper.stats.closed_count }}</strong>
+        </div>
+        <div>
+            <span class="metric-label">Win rate</span>
+            <strong>{{ paper.stats.win_rate|fmt_pct }}</strong>
+        </div>
+        <div>
+            <span class="metric-label">4%+ success</span>
+            <strong>{{ paper.stats.success_rate|fmt_pct }}</strong>
+        </div>
+        <div>
+            <span class="metric-label">Avg trade</span>
+            <strong class="{% if paper.stats.avg_return >= 0 %}gain-text{% else %}loss-text{% endif %}">{{ paper.stats.avg_return|fmt_pct }}</strong>
+        </div>
+        <div>
+            <span class="metric-label">Best trade</span>
+            <strong class="gain-text">{{ paper.stats.best_return|fmt_pct }}</strong>
+        </div>
+        <div>
+            <span class="metric-label">Worst trade</span>
+            <strong class="loss-text">{{ paper.stats.worst_return|fmt_pct }}</strong>
+        </div>
+        <div>
+            <span class="metric-label">Mode</span>
+            <strong>Adaptive runner</strong>
+        </div>
+    </section>
+
+    <section class="results">
+        <div class="section-heading">
+            <h2>Open Positions</h2>
+            <span>{{ paper.positions|length }} active simulated trades</span>
+        </div>
+
+        {% if paper.positions %}
+            <div class="paper-table">
+                {% for position in paper.positions %}
+                    {% set latest = position.latest_price or position.entry_price %}
+                    {% set current_value = latest * position.quantity %}
+                    {% set pnl = current_value - position.invested %}
+                    {% set pnl_pct = (pnl / position.invested) * 100 %}
+                    <article class="paper-row">
+                        <strong class="paper-coin">
+                            <a href="{{ position.ticker|binance_url }}" target="_blank" rel="noopener noreferrer">{{ position.ticker|display_pair }}</a>
+                            <span>
+                                <a href="{{ position.ticker|binance_url }}" target="_blank" rel="noopener noreferrer">Binance</a>
+                                <a href="{{ position.ticker|coingecko_url }}" target="_blank" rel="noopener noreferrer">Info</a>
+                            </span>
+                        </strong>
+                        <span>Entry {{ position.entry_price|fmt_price }}</span>
+                        <span>Latest {{ latest|fmt_price }}</span>
+                        <span>Target {{ position.target_price|fmt_price }}</span>
+                        <span>Stop {{ position.stop_price|fmt_price }}</span>
+                        <span>Trail {{ position.trailing_stop|fmt_price }}</span>
+                        <span class="{% if pnl >= 0 %}gain-text{% else %}loss-text{% endif %}">P/L {{ pnl|fmt_money_exact }} / {{ pnl_pct|fmt_pct }}</span>
+                        <span>Age {{ ((paper.state.last_tick_at or position.opened_at) - position.opened_at) // 60 }}m</span>
+                        <small>{{ position.open_reason }}</small>
+                    </article>
+                {% endfor %}
+            </div>
+        {% else %}
+            <section class="empty-state compact-empty">
+                <h2>No open paper positions</h2>
+                <p>Start the paper trader and it will wait for high-upside frequent-trading candidates.</p>
+            </section>
+        {% endif %}
+    </section>
+
+    <section class="history-panel">
+        <div class="section-heading">
+            <h2>Closed Trades</h2>
+            <span>{{ paper.closed_positions|length }} most recent exits</span>
+        </div>
+
+        {% if paper.closed_positions %}
+            <div class="paper-table">
+                {% for position in paper.closed_positions %}
+                    <article class="paper-row closed-row">
+                        <strong class="paper-coin">
+                            <a href="{{ position.ticker|binance_url }}" target="_blank" rel="noopener noreferrer">{{ position.ticker|display_pair }}</a>
+                            <span>
+                                <a href="{{ position.ticker|binance_url }}" target="_blank" rel="noopener noreferrer">Binance</a>
+                                <a href="{{ position.ticker|coingecko_url }}" target="_blank" rel="noopener noreferrer">Info</a>
+                            </span>
+                        </strong>
+                        <span>Entry {{ position.entry_price|fmt_price }}</span>
+                        <span>Exit {{ position.latest_price|fmt_price }}</span>
+                        <span class="{% if position.realized_pnl >= 0 %}gain-text{% else %}loss-text{% endif %}">P/L {{ position.realized_pnl|fmt_money_exact }} / {{ position.realized_return_pct|fmt_pct }}</span>
+                        <span>{{ position.close_reason }}</span>
+                        <span>Opened {{ position.opened_at|fmt_time }}</span>
+                        <span>Closed {{ position.closed_at|fmt_time }}</span>
+                    </article>
+                {% endfor %}
+            </div>
+        {% else %}
+            <section class="empty-state compact-empty">
+                <h2>No closed trades yet</h2>
+                <p>Closed simulated trades will appear here after stop, trail, stale exit, or safety exit.</p>
+            </section>
+        {% endif %}
+    </section>
+</main>
+<script>
+setTimeout(function() {
+    window.location.reload();
+}, 10000);
+</script>
+</body>
+</html>

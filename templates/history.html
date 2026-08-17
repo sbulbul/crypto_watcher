@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Scan History - Crypto Hourly Watcher</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<main class="shell">
+    <header class="topbar">
+        <div>
+            <p class="eyebrow">Persistent crypto scan archive</p>
+            <h1>Scan History</h1>
+        </div>
+        <div class="header-actions">
+            <a class="reset-button" href="{{ url_for('home') }}">Dashboard</a>
+            {% if scan_history %}
+                <a class="reset-button" href="{{ url_for('export_history') }}">Export All History</a>
+                <form action="{{ url_for('clear_history') }}" method="post" onsubmit="return confirm('Delete all saved scan history? This cannot be undone.');">
+                    <button class="danger-button" type="submit">Clear All History</button>
+                </form>
+            {% endif %}
+        </div>
+    </header>
+
+    {% if scan_history %}
+        <section class="history-panel standalone-history">
+            <div class="history-table">
+                {% for scan in scan_history %}
+                    <div class="history-row history-row-full">
+                        <a href="{{ url_for('view_scan', scan_id=scan.id) }}">#{{ scan.id }}</a>
+                        <span>{{ scan.completed_at|fmt_time }}</span>
+                        <span>{{ scan.status }}</span>
+                        <span>{{ scan.limit_requested }} scanned</span>
+                        <span>{{ scan.candidate_count }} candidates</span>
+                        <span>Top {{ scan.top_score or "-" }}</span>
+                        <span>Avg {{ scan.avg_return_pct|fmt_pct }}</span>
+                        <span>Best {{ scan.best_return_pct|fmt_pct }}</span>
+                        <span>{{ scan.double_count or 0 }} up 25%+</span>
+                        <form action="{{ url_for('delete_scan_route', scan_id=scan.id) }}" method="post" onsubmit="return confirm('Delete scan #{{ scan.id }}?');">
+                            <button class="danger-button small-danger" type="submit">Delete</button>
+                        </form>
+                    </div>
+                {% endfor %}
+            </div>
+        </section>
+    {% else %}
+        <section class="empty-state">
+            <h2>No saved scans yet</h2>
+            <p>Run a scan and it will be saved here automatically.</p>
+        </section>
+    {% endif %}
+</main>
+</body>
+</html>

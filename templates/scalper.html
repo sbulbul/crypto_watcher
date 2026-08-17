@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Fast Scalper - Crypto Hourly Watcher</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<main class="shell">
+    <header class="topbar">
+        <div>
+            <p class="eyebrow">Simulated fast account</p>
+            <h1>Fast Scalper</h1>
+        </div>
+        <div class="header-actions">
+            <a class="reset-button" href="{{ url_for('home') }}">Dashboard</a>
+            <a class="reset-button" href="{{ url_for('paper') }}">Paper Trader</a>
+            <a class="reset-button" href="{{ url_for('history') }}">History</a>
+        </div>
+    </header>
+
+    <section class="control-panel">
+        <form action="{{ url_for('start_scalper_route') }}" method="post">
+            <button type="submit" {% if scalper.state.running %}disabled{% endif %}>Start Scalper</button>
+            <button class="danger-button" formaction="{{ url_for('stop_scalper_route') }}" type="submit" {% if not scalper.state.running %}disabled{% endif %}>Stop</button>
+            <button class="danger-button" formaction="{{ url_for('reset_scalper_route') }}" type="submit" onclick="return confirm('Reset scalper account to $5,000 and delete scalper trades?');">Reset</button>
+        </form>
+
+        <div class="paper-status">
+            <span>Status <strong>{{ scalper.state.status }}</strong></span>
+            <span>Last scan <strong>{{ scalper.state.last_scan_at|fmt_time }}</strong></span>
+            <span>Scan speed <strong>{{ scalper.state.last_scan_ms or '-' }} ms</strong></span>
+            <span>Last price check <strong>{{ scalper.state.last_tick_at|fmt_time }}</strong></span>
+            <span>Last symbol <strong>{{ scalper.state.last_symbol|display_pair if scalper.state.last_symbol else '-' }}</strong></span>
+            <span>Watchlist <strong>{{ scalper.rules.watchlist|length }}</strong></span>
+            {% if scalper.state.error %}
+                <span class="loss">Error <strong>{{ scalper.state.error }}</strong></span>
+            {% endif %}
+        </div>
+    </section>
+
+    <section class="summary-grid">
+        <div>
+            <span class="metric-label">Equity</span>
+            <strong>{{ scalper.equity|fmt_price }}</strong>
+        </div>
+        <div>
+            <span class="metric-label">Cash</span>
+            <strong>{{ scalper.account.cash|fmt_price }}</strong>
+        </div>
+        <div>
+            <span class="metric-label">Open value</span>
+            <strong>{{ scalper.open_value|fmt_price }}</strong>
+        </div>
+        <div>
+            <span class="metric-label">Unrealized P/L</span>
+            <strong class="{% if scalper.unrealized_pnl >= 0 %}gain-text{% else %}loss-text{% endif %}">{{ scalper.unrealized_pnl|fmt_money_exact }}</strong>
+        </div>
+        <div>
+            <span class="metric-label">Realized P/L</span>
+            <strong class="{% if scalper.account.realized_pnl >= 0 %}gain-text{% else %}loss-text{% endif %}">{{ scalper.account.realized_pnl|fmt_money_exact }}</strong>
+        </div>
+        <div>
+            <span class="metric-label">Total return</span>
+            <strong class="{% if scalper.total_return_pct >= 0 %}gain-text{% else %}loss-text{% endif %}">{{ scalper.total_return_pct|fmt_pct }}</strong>
+        </div>
+    </section>
+
+    <section class="history-panel">
+        <div class="section-heading">
+            <h2>Scalper Rules</h2>
+            <span>1m candle impulse, hold until +3% net, then trail</span>
+        </div>
+        <div class="paper-rules">
+            <span>Poll <strong>{{ scalper.rules.poll_seconds }} sec</strong></span>
+            <span>Workers <strong>{{ scalper.rules.scan_workers }}</strong></span>
+            <span>Max hold <strong>{{ scalper.rules.max_hold_seconds }} sec</strong></span>
+            <span>Max open <strong>{{ scalper.rules.max_open_positions }}</strong></span>
+            <span>Position <strong>{{ scalper.rules.position_usd|fmt_price }}</strong></span>
+            <span>Profit gate <strong>{{ scalper.rules.profit_gate_net_pct|fmt_pct }}</strong></span>
+            <span>Exit mode <strong>Trail after gate</strong></span>
+            <span>Pre-gate stop <strong>Off</strong></span>
+            <span>Fee <strong>{{ scalper.rules.fee_pct|fmt_pct }}</strong></span>
+            <span>Slippage <strong>{{ scalper.rules.slippage_pct|fmt_pct }}</strong></span>
+        </div>
+    </section>
+
+    <section class="summary-grid">
+        <div>
+            <span class="metric-label">Closed trades</span>
+            <strong>{{ scalper.stats.closed_count }}</strong>
+        </div>
+        <div>
+            <span class="metric-label">Win rate</span>
+            <strong>{{ scalper.stats.win_rate|fmt_pct }}</strong>
+        </div>
+        <div>
+            <span class="metric-label">Avg trade</span>
+            <strong class="{% if scalper.stats.avg_return >= 0 %}gain-text{% else %}loss-text{% endif %}">{{ scalper.stats.avg_return|fmt_pct }}</strong>
+        </div>
+        <div>
+            <span class="metric-label">Best trade</span>
+            <strong class="gain-text">{{ scalper.stats.best_return|fmt_pct }}</strong>
+        </div>
+        <div>
+            <span class="metric-label">Worst trade</span>
+            <strong class="loss-text">{{ scalper.stats.worst_return|fmt_pct }}</strong>
+        </div>
+        <div>
+            <span class="metric-label">Mode</span>
+            <strong>Fast scalp</strong>
+        </div>
+    </section>
+
+    {% if scalper.state.last_decisions %}
+        <section class="history-panel">
+            <div class="section-heading">
+                <h2>Last Decisions</h2>
+                <span>Latest 1m scorecard output</span>
+            </div>
+            <div class="paper-rules">
+                {% for symbol, decision in scalper.state.last_decisions.items() %}
+                    <span>{{ symbol|display_pair }} <strong>{{ decision }}</strong></span>
+                {% endfor %}
+            </div>
+        </section>
+    {% endif %}
+
+    <section class="results">
+        <div class="section-heading">
+            <h2>Open Scalps</h2>
+            <span>{{ scalper.positions|length }} active simulated scalps</span>
+        </div>
+
+        {% if scalper.positions %}
+            <div class="paper-table">
+                {% for position in scalper.positions %}
+                    {% set latest = position.latest_price or position.entry_price %}
+                    {% set current_value = latest * position.quantity %}
+                    {% set pnl = current_value - position.invested %}
+                    {% set pnl_pct = (pnl / position.invested) * 100 %}
+                    <article class="paper-row">
+                        <strong class="paper-coin">
+                            <a href="{{ position.symbol|binance_url }}" target="_blank" rel="noopener noreferrer">{{ position.symbol|display_pair }}</a>
+                            <span><a href="{{ position.symbol|binance_url }}" target="_blank" rel="noopener noreferrer">Binance</a></span>
+                        </strong>
+                        <span>Entry {{ position.entry_price|fmt_price }}</span>
+                        <span>Latest {{ latest|fmt_price }}</span>
+                        <span>Target {{ position.target_price|fmt_price }}</span>
+                        <span>Stop {{ position.stop_price|fmt_price }}</span>
+                        <span>Trail {{ position.trailing_stop|fmt_price }}</span>
+                        <span class="{% if pnl >= 0 %}gain-text{% else %}loss-text{% endif %}">P/L {{ pnl|fmt_money_exact }} / {{ pnl_pct|fmt_pct }}</span>
+                        <span>Age {{ ((scalper.state.last_tick_at or position.opened_at) - position.opened_at) // 1 }}s</span>
+                        <small>{{ position.open_reason }}</small>
+                    </article>
+                {% endfor %}
+            </div>
+        {% else %}
+            <section class="empty-state compact-empty">
+                <h2>No open scalps</h2>
+                <p>The scalper waits for short 1m momentum bursts before taking simulated trades.</p>
+            </section>
+        {% endif %}
+    </section>
+
+    <section class="history-panel">
+        <div class="section-heading">
+            <h2>Closed Scalps</h2>
+            <span>{{ scalper.closed_positions|length }} most recent exits</span>
+        </div>
+
+        {% if scalper.closed_positions %}
+            <div class="paper-table">
+                {% for position in scalper.closed_positions %}
+                    <article class="paper-row closed-row">
+                        <strong>{{ position.symbol|display_pair }}</strong>
+                        <span>Entry {{ position.entry_price|fmt_price }}</span>
+                        <span>Exit {{ position.latest_price|fmt_price }}</span>
+                        <span class="{% if position.realized_pnl >= 0 %}gain-text{% else %}loss-text{% endif %}">P/L {{ position.realized_pnl|fmt_money_exact }} / {{ position.realized_return_pct|fmt_pct }}</span>
+                        <span>{{ position.close_reason }}</span>
+                        <span>Opened {{ position.opened_at|fmt_time }}</span>
+                        <span>Closed {{ position.closed_at|fmt_time }}</span>
+                    </article>
+                {% endfor %}
+            </div>
+        {% else %}
+            <section class="empty-state compact-empty">
+                <h2>No closed scalps yet</h2>
+                <p>Closed scalps will appear only after a position first reaches the profit gate and then trails back.</p>
+            </section>
+        {% endif %}
+    </section>
+</main>
+<script>
+setTimeout(function() {
+    window.location.reload();
+}, 2000);
+</script>
+</body>
+</html>

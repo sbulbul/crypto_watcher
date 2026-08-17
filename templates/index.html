@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Crypto Hourly Watcher</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+{% macro result_card(item, rank, mode="quick") %}
+{% set display_score = item.long_term_score if mode == "long" else item.quick_win_score %}
+<article class="result-card {% if display_score >= 60 %}strong-card{% else %}spec-card{% endif %}">
+    <div class="card-main">
+        <div class="ticker-block">
+            <span class="rank">#{{ rank }}</span>
+            <h3>{{ item.ticker|display_pair }}</h3>
+            <span class="signal">
+                {% if mode == "long" %}{{ item.long_term_signal }}{% else %}{{ item.signal }}{% endif %}
+                <a class="stock-link" href="{{ item.ticker|binance_url }}" target="_blank" rel="noopener noreferrer">View Binance</a>
+            </span>
+        </div>
+
+        <div class="score {% if display_score >= 70 %}high{% elif display_score >= 40 %}medium{% else %}low{% endif %}">
+            <small>{% if mode == "long" %}Sell risk{% else %}Buy setup{% endif %}</small>
+            {{ display_score }}<span>/100</span>
+        </div>
+    </div>
+
+    <div class="stat-row">
+        <div><span>Price</span><strong>{{ item.price|fmt_price }}</strong></div>
+        <div><span>1H move</span><strong>{{ item.price_change }}%</strong></div>
+        <div><span>4H move</span><strong>{{ item.price_change_5d }}%</strong></div>
+        <div><span>24H move</span><strong>{{ item.price_change_20d }}%</strong></div>
+        <div><span>Hourly $ vol</span><strong>${{ "{:,.0f}".format(item.dollar_volume) }}</strong></div>
+        <div><span>Rel vol</span><strong>{{ item.relative_volume }}x</strong></div>
+        <div><span>Sell risk</span><strong>{{ item.long_term_score }}/100</strong></div>
+        <div><span>Buy setup</span><strong>{{ item.quick_win_score }}/100</strong></div>
+    </div>
+
+    <div class="trade-plan">
+        <div>
+            <span>Entry area</span>
+            <strong>{% if item.entry_low is defined and item.entry_low is not none %}{{ item.entry_low|fmt_price }} - {{ item.entry_high|fmt_price }}{% else %}-{% endif %}</strong>
+        </div>
+        <div>
+            <span>Target</span>
+            <strong>{% if item.target_price is defined and item.target_price is not none %}{{ item.target_price|fmt_price }}{% else %}-{% endif %}</strong>
+        </div>
+        <div>
+            <span>Target %</span>
+            <strong>{% if item.target_profit_pct is defined and item.target_profit_pct is not none %}{{ item.target_profit_pct }}%{% else %}-{% endif %}</strong>
+        </div>
+        <div>
+            <span>Window</span>
+            <strong>{{ item.target_window or "-" }}</strong>
+        </div>
+        <div>
+            <span>Risk break</span>
+            <strong>{% if item.stop_price is defined and item.stop_price is not none %}{{ item.stop_price|fmt_price }}{% else %}-{% endif %}</strong>
+        </div>
+        <div>
+            <span>R/R</span>
+            <strong>{% if item.reward_risk is defined and item.reward_risk is not none %}{{ item.reward_risk }}x{% else %}-{% endif %}</strong>
+        </div>
+        <div>
+            <span>RSI</span>
+            <strong>{% if item.rsi is defined and item.rsi is not none %}{{ "%.0f"|format(item.rsi) }}{% else %}-{% endif %}</strong>
+        </div>
+        <div>
+            <span>24H range</span>
+            <strong>{% if item.range_24h_pct is defined and item.range_24h_pct is not none %}{{ item.range_24h_pct }}%{% else %}-{% endif %}</strong>
+        </div>
+        <div>
+            <span>Book / flow</span>
+            <strong>
+                {% set flow = item.market_flow or {} %}
+                {% if flow.book_imbalance is defined %}{{ "%.2f"|format(flow.book_imbalance) }}x book{% elif flow.taker_buy_ratio is defined %}{{ "%.0f"|format(flow.taker_buy_ratio * 100) }}% buys{% else %}-{% endif %}
+            </strong>
+        </div>
+    </div>
+
+    {% if item.return_pct is defined and item.return_pct is not none %}
+        <div class="performance-row {% if item.return_pct >= 0 %}gain{% else %}loss{% endif %}">
+            <div>
+                <span>Return since scan</span>
+                <strong>{{ item.return_pct|fmt_pct }}</strong>
+            </div>
+            <div>
+                <span>Scan price</span>
+                <strong>{{ item.price|fmt_price }}</strong>
+            </div>
+            <div>
+                <span>Checked price</span>
+                <strong>{{ item.checked_price|fmt_price }}</strong>
+            </div>
+            <div>
+                <span>Price source</span>
+                <strong>{{ item.checked_source or "Latest available" }}</strong>
+            </div>
+            <div>
+                <span>Checked</span>
+                <strong>{{ item.checked_at|fmt_time }}</strong>
+            </div>
+        </div>
+    {% endif %}
+
+    <p class="headline">{{ item.trade_note or item.headline }}</p>
+
+    <ul class="reasons">
+        {% set active_reasons = item.long_term_reasons if mode == "long" else item.quick_win_reasons %}
+        {% for reason in active_reasons %}
+            <li>{{ reason }}</li>
+        {% endfor %}
+    </ul>
+</article>
+{% endmacro %}
+
+<main class="shell">
+    <header class="topbar">
+        <div>
+            <p class="eyebrow">Local hourly scanner</p>
+            <h1>Crypto Hourly Watcher</h1>
+        </div>
+        <div class="status-pill">Crypto 1H</div>
+    </header>
+
+    <section class="control-panel">
+        <form id="scanForm" action="/scan" method="get">
+            <label for="limit">Scan limit</label>
+            <input id="limit" type="number" name="limit" value="{{ limit }}" min="25" max="1000" step="25">
+            <button id="scanButton" type="submit">Scan Crypto</button>
+            {% if scanned and not running %}
+                <a class="reset-button" href="{{ url_for('reset') }}">Reset Results</a>
+            {% endif %}
+            <a class="reset-button" href="{{ url_for('history') }}">History</a>
+            <a class="reset-button" href="{{ url_for('paper') }}">Paper Trader</a>
+        </form>
+
+        <div id="progressPanel" class="progress-panel {% if running %}active{% endif %}">
+            <div class="progress-topline">
+                <span><span class="pulse"></span><span id="progressText">Scanning hourly crypto data</span></span>
+                <div class="progress-actions">
+                    <strong id="progressPercent">0%</strong>
+                    <button id="stopButton" class="stop-button" type="button">Stop Scan</button>
+                </div>
+            </div>
+            <div class="progress-track">
+                <div id="progressFill" class="progress-fill"></div>
+            </div>
+            <div class="progress-stats">
+                <span>Scanned <strong id="processedCount">0</strong>/<strong id="totalCount">0</strong></span>
+                <span>Remaining <strong id="remainingCount">0</strong></span>
+                <span>Current <strong id="currentTicker">--</strong></span>
+                <span>Candidates <strong id="candidateCount">0</strong></span>
+                <span>Elapsed <strong id="elapsedTime">0s</strong></span>
+            </div>
+        </div>
+    </section>
+
+    {% if error %}
+        <section class="empty-state error-state">
+            <h2>Scan error</h2>
+            <p>{{ error }}</p>
+        </section>
+    {% elif results %}
+        <section class="summary-grid">
+            <div>
+                <span class="metric-label">Candidates</span>
+                <strong>{{ results|length }}</strong>
+            </div>
+            <div>
+                <span class="metric-label">Top buy score</span>
+                <strong>{{ results[0].moonshot_score }}/100</strong>
+            </div>
+            <div>
+                <span class="metric-label">Crypto scan</span>
+                <strong>{{ limit }}</strong>
+            </div>
+            <div>
+                <span class="metric-label">First scan time</span>
+                <strong>{{ scan_started_at|fmt_time }}</strong>
+            </div>
+            <div>
+                <span class="metric-label">Completed</span>
+                <strong>{{ scan_completed_at|fmt_time }}</strong>
+            </div>
+            <div>
+                <span class="metric-label">Mode</span>
+                <strong>10%+ upside</strong>
+            </div>
+        </section>
+
+        {% if scan_id %}
+            <section class="scan-actions">
+                <div>
+                    <span class="metric-label">Saved scan</span>
+                    <strong>#{{ scan_id }}</strong>
+                </div>
+                <form id="performanceForm" action="{{ url_for('update_performance', scan_id=scan_id) }}" method="post">
+                    <button id="performanceButton" type="submit">Update Performance</button>
+                </form>
+                <a class="reset-button" href="{{ url_for('export_scan', scan_id=scan_id) }}">Export This Scan</a>
+            </section>
+            <section id="performancePanel" class="progress-panel performance-panel">
+                <div class="progress-topline">
+                    <span><span class="pulse"></span><span id="performanceText">Checking saved tickers</span></span>
+                    <strong id="performancePercent">0%</strong>
+                </div>
+                <div class="progress-track">
+                    <div id="performanceFill" class="progress-fill"></div>
+                </div>
+                <div class="progress-stats">
+                    <span>Checked <strong id="performanceProcessed">0</strong>/<strong id="performanceTotal">0</strong></span>
+                    <span>Remaining <strong id="performanceRemaining">0</strong></span>
+                    <span>Current <strong id="performanceTicker">--</strong></span>
+                    <span>Updated <strong id="performanceUpdated">0</strong></span>
+                    <span>Status <strong id="performanceStatus">Ready</strong></span>
+                </div>
+            </section>
+        {% endif %}
+
+        <section class="results">
+            <div class="section-heading">
+                <h2>Hourly Buy Setups</h2>
+                <span>{{ quick_win_results|length }} coins with fresh 1h/4h momentum</span>
+            </div>
+
+            {% if quick_win_results %}
+                {% for item in quick_win_results %}
+                    {{ result_card(item, loop.index, "quick") }}
+                {% endfor %}
+            {% else %}
+                <section class="empty-state compact-empty">
+                    <h2>No hourly buy setups</h2>
+                    <p>The scan found candidates, but none reached the buy threshold.</p>
+                </section>
+            {% endif %}
+
+            {% if long_term_results %}
+                <div class="section-heading secondary-heading">
+                    <h2>Sell / Avoid Signals</h2>
+                    <span>{{ long_term_results|length }} coins showing hourly weakness or rejection risk</span>
+                </div>
+
+                {% for item in long_term_results %}
+                    {{ result_card(item, loop.index, "long") }}
+                {% endfor %}
+            {% endif %}
+
+            {% if other_results %}
+                <div class="section-heading secondary-heading">
+                    <h2>Lower-Confidence Watchlist</h2>
+                    <span>{{ other_results|length }} coins below both strong thresholds</span>
+                </div>
+
+                {% for item in other_results %}
+                    {{ result_card(item, loop.index, "quick") }}
+                {% endfor %}
+            {% endif %}
+        </section>
+    {% elif running %}
+        <section class="empty-state">
+            <h2>Scan running</h2>
+            <p>The dashboard will refresh when the scan is complete.</p>
+        </section>
+    {% elif stopped %}
+        <section class="empty-state">
+            <h2>Scan stopped</h2>
+            <p>The scan was stopped before completion. Any candidates found before stopping are shown above.</p>
+        </section>
+    {% elif scanned %}
+        <section class="empty-state">
+            <h2>No candidates found</h2>
+            <p>The scan completed, but nothing passed the current hourly buy or sell filters.</p>
+        </section>
+    {% else %}
+        <section class="empty-state">
+            <h2>No scan results yet</h2>
+            <p>Choose a universe size and run a scan to surface hourly crypto buy and sell candidates.</p>
+        </section>
+    {% endif %}
+
+    {% if scan_history %}
+        <section class="history-panel">
+            <div class="section-heading">
+                <h2>Recent Scan History</h2>
+                <a href="{{ url_for('history') }}">View all</a>
+            </div>
+            <div class="history-table">
+                {% for scan in scan_history %}
+                    <div class="history-row">
+                        <a href="{{ url_for('view_scan', scan_id=scan.id) }}">#{{ scan.id }}</a>
+                        <span>{{ scan.completed_at|fmt_time }}</span>
+                        <span>{{ scan.candidate_count }} candidates</span>
+                        <span>Top {{ scan.top_score or "-" }}</span>
+                        <span>Avg {{ scan.avg_return_pct|fmt_pct }}</span>
+                        <span>Best {{ scan.best_return_pct|fmt_pct }}</span>
+                        <form action="{{ url_for('delete_scan_route', scan_id=scan.id) }}" method="post" onsubmit="return confirm('Delete scan #{{ scan.id }}?');">
+                            <button class="danger-button small-danger" type="submit">Delete</button>
+                        </form>
+                    </div>
+                {% endfor %}
+            </div>
+        </section>
+    {% endif %}
+</main>
+
+<script>
+const scanForm = document.getElementById("scanForm");
+const scanButton = document.getElementById("scanButton");
+const progressPanel = document.getElementById("progressPanel");
+const progressFill = document.getElementById("progressFill");
+const progressText = document.getElementById("progressText");
+const progressPercent = document.getElementById("progressPercent");
+const stopButton = document.getElementById("stopButton");
+const processedCount = document.getElementById("processedCount");
+const totalCount = document.getElementById("totalCount");
+const remainingCount = document.getElementById("remainingCount");
+const currentTicker = document.getElementById("currentTicker");
+const candidateCount = document.getElementById("candidateCount");
+const elapsedTime = document.getElementById("elapsedTime");
+let pollTimer = null;
+
+function setScanning(isScanning) {
+    progressPanel.classList.toggle("active", isScanning);
+    scanButton.disabled = isScanning;
+    scanButton.innerText = isScanning ? "Scanning..." : "Scan Crypto";
+    stopButton.disabled = !isScanning;
+    stopButton.innerText = "Stop Scan";
+}
+
+function renderProgress(status) {
+    const percent = Number(status.percent || 0);
+    progressFill.style.width = `${percent}%`;
+    progressPercent.innerText = `${percent.toFixed(percent % 1 ? 1 : 0)}%`;
+    processedCount.innerText = status.processed || 0;
+    totalCount.innerText = status.total || 0;
+    remainingCount.innerText = status.remaining || 0;
+    currentTicker.innerText = status.ticker || "--";
+    candidateCount.innerText = status.candidates || 0;
+    elapsedTime.innerText = `${Math.round(status.elapsed || 0)}s`;
+
+    if (status.total) {
+        progressText.innerText = status.stop_requested
+            ? `Stopping after ${status.processed} of ${status.total}`
+            : `Scanning ${status.processed} of ${status.total}`;
+    } else {
+        progressText.innerText = status.stop_requested ? "Stopping scan" : "Preparing crypto universe";
+    }
+
+    if (status.stop_requested) {
+        stopButton.disabled = true;
+        stopButton.innerText = "Stopping...";
+    }
+}
+
+async function pollStatus() {
+    const response = await fetch("{{ url_for('scan_status') }}", { cache: "no-store" });
+    const status = await response.json();
+    renderProgress(status);
+
+    if (!status.running) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+        setScanning(false);
+        window.location.href = "{{ url_for('home') }}";
+    }
+}
+
+scanForm.addEventListener("submit", async function(event) {
+    event.preventDefault();
+    setScanning(true);
+    renderProgress({ percent: 0, processed: 0, total: 0, remaining: 0, ticker: "", candidates: 0, elapsed: 0 });
+
+    const limit = document.getElementById("limit").value;
+    const response = await fetch(`{{ url_for('start_scan_route') }}?limit=${encodeURIComponent(limit)}`, {
+        cache: "no-store"
+    });
+    const status = await response.json();
+    renderProgress(status);
+
+    if (!pollTimer) {
+        pollTimer = setInterval(pollStatus, 1000);
+    }
+});
+
+stopButton.addEventListener("click", async function() {
+    stopButton.disabled = true;
+    stopButton.innerText = "Stopping...";
+    await fetch("{{ url_for('stop_scan') }}", {
+        method: "POST",
+        cache: "no-store"
+    });
+    pollStatus();
+});
+
+{% if running %}
+setScanning(true);
+pollStatus();
+if (!pollTimer) {
+    pollTimer = setInterval(pollStatus, 1000);
+}
+{% endif %}
+
+const performanceForm = document.getElementById("performanceForm");
+const performanceButton = document.getElementById("performanceButton");
+const performancePanel = document.getElementById("performancePanel");
+const performanceFill = document.getElementById("performanceFill");
+const performanceText = document.getElementById("performanceText");
+const performancePercent = document.getElementById("performancePercent");
+const performanceProcessed = document.getElementById("performanceProcessed");
+const performanceTotal = document.getElementById("performanceTotal");
+const performanceRemaining = document.getElementById("performanceRemaining");
+const performanceTicker = document.getElementById("performanceTicker");
+const performanceUpdated = document.getElementById("performanceUpdated");
+const performanceStatus = document.getElementById("performanceStatus");
+let performancePollTimer = null;
+
+function renderPerformanceProgress(status) {
+    const percent = Number(status.percent || 0);
+    performancePanel.classList.add("active");
+    performanceFill.style.width = `${percent}%`;
+    performancePercent.innerText = `${percent.toFixed(percent % 1 ? 1 : 0)}%`;
+    performanceProcessed.innerText = status.processed || 0;
+    performanceTotal.innerText = status.total || 0;
+    performanceRemaining.innerText = status.remaining || 0;
+    performanceTicker.innerText = status.ticker || "--";
+    performanceUpdated.innerText = status.updated || 0;
+    performanceStatus.innerText = status.error ? "Error" : (status.running ? "Checking" : "Done");
+
+    if (status.total) {
+        performanceText.innerText = `Checking ${status.processed} of ${status.total}`;
+    } else {
+        performanceText.innerText = "Preparing performance check";
+    }
+}
+
+async function pollPerformanceStatus() {
+    const response = await fetch("{{ url_for('performance_status') }}", { cache: "no-store" });
+    const status = await response.json();
+    renderPerformanceProgress(status);
+
+    if (!status.running) {
+        clearInterval(performancePollTimer);
+        performancePollTimer = null;
+        if (performanceButton) {
+            performanceButton.disabled = false;
+            performanceButton.innerText = "Update Performance";
+        }
+        window.location.reload();
+    }
+}
+
+if (performanceForm) {
+    performanceForm.addEventListener("submit", async function(event) {
+        event.preventDefault();
+        performanceButton.disabled = true;
+        performanceButton.innerText = "Checking...";
+        renderPerformanceProgress({ percent: 0, processed: 0, total: 0, remaining: 0, ticker: "", updated: 0, running: true });
+
+        const response = await fetch("{{ url_for('start_performance_update', scan_id=scan_id or 0) }}", {
+            method: "POST",
+            cache: "no-store"
+        });
+        const status = await response.json();
+        renderPerformanceProgress(status);
+
+        if (!performancePollTimer) {
+            performancePollTimer = setInterval(pollPerformanceStatus, 1000);
+        }
+    });
+}
+</script>
+
+</body>
+</html>

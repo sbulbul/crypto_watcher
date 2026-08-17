@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+
+# Local SQLite databases and caches — runtime/generated data, not source
+data/*.db
+crypto_watcher.db
