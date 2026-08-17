@@ -1,5 +1,6 @@
 __pycache__/
 *.pyc
+.pytest_cache/
 
 # Local SQLite databases and caches — runtime/generated data, not source
 data/*.db

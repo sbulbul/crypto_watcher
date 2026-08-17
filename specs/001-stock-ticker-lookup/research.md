@@ -1,115 +1,122 @@
-# Research: Stock Ticker Lookup
+# Research: Crypto Ticker Lookup
 
-All Technical Context items were resolvable from the existing repository; no items
-required external research beyond reading the current codebase. This document
-records the decisions and — most importantly — the one non-obvious tradeoff
-(recommendation methodology) that the spec's FR-005 assumption couldn't fully
-resolve on its own.
+This supersedes the stock-ticker version of this research document. Most Technical
+Context items are unchanged from that version (interaction pattern, testing
+framework); what changed is everything downstream of the asset-class pivot —
+recommendation methodology, price retrieval, and not-found/unavailable detection all
+now map onto *real, already-existing* crypto functions instead of new stock-specific
+code.
 
-## Decision: Recommendation methodology for stock tickers
+## Decision: Recommendation methodology for crypto tickers
 
-**Decision**: Compute the Buy/Sell/Hold recommendation from real, `yfinance`-sourced
-technical signals for the ticker (recent price change %, short-vs-longer
-moving-average trend, and volume trend), combined into a single 0–100 score and
-mapped to a signal using the same threshold philosophy already codified in
-`config.py` (`MIN_BUY_SCORE = 25`, `MIN_SELL_SCORE = 55`): score at or below the buy
-threshold → Buy, score at or above the sell threshold → Sell, otherwise → Hold.
+**Decision**: Call `scanner.py`'s `score_from_history(coin, hist, market_flow)`
+directly — the exact function the batch scanner already calls for every coin it
+scans — for the single user-submitted ticker. `hist` comes from
+`scanner.fetch_market_data([ticker])` (the same `yfinance` hourly-OHLCV bulk-download
+helper the scanner uses, called with a one-item list) via `get_ticker_frame()`;
+`market_flow` comes from `market_flow.fetch_market_flow(ticker, current_price)` (the
+same Binance order-book/funding-rate/taker-buy-ratio fetch used elsewhere). The
+function's return value already contains `quick_win_score`, `long_term_score`,
+`signal`, and `long_term_signal` — the app's real dual-score output.
 
-**Rationale**: The feature spec (FR-005) says the recommendation must use "the same
-evaluation criteria the system already applies to stocks elsewhere in the app." In
-practice, the app's only existing scoring logic (`scorer.py`'s
-`score_market_flow()`) scores *crypto* market-microstructure signals — order-book
-bid/ask imbalance, taker-buy ratio, and futures funding rate — all sourced from
-Binance's crypto exchange APIs (`market_flow.py`). None of those inputs exist for an
-equity ticker; Yahoo Finance (via `yfinance`, the only equity-capable dependency the
-app has) does not expose an order book or a funding rate for stocks. Literally
-calling the existing scorer is therefore not possible without fabricating inputs,
-which would violate the constitution's Live API Integrity principle (no data
-presented as live that isn't real). The closest honest interpretation of FR-005 is
-to reuse the app's *scoring architecture* — a numeric score compared against
-`config.py`'s existing buy/sell thresholds, producing the same three-way signal
-vocabulary used elsewhere — computed from signals that are actually available and
-real for equities.
+To reduce that dual-score output to the single Buy/Sell/Hold label FR-004 asks for,
+reuse the exact candidate logic `scanner.py`'s `scan_market()` already uses to decide
+what counts as a buy vs. sell setup (`config.py`'s `MIN_BUY_SCORE`/`MIN_SELL_SCORE`):
+
+- `long_term_score >= MIN_SELL_SCORE` → **Sell**
+- else if `quick_win_score >= MIN_BUY_SCORE` → **Buy**
+- else → **Hold**
+
+**Rationale**: FR-005 says the recommendation must use "the same evaluation criteria
+the system already applies to coins elsewhere in the app." For crypto, unlike stocks,
+this is achievable *literally* — `score_from_history()`/`calculate_score()` already
+scores exactly this ticker type using exactly this data (Binance market-flow +
+hourly OHLCV), because that is what the scanner has always done. This closes the gap
+the stock version's research.md had to work around (crypto-only order-book/funding
+data that stocks don't have) — the recommendation is no longer a parallel,
+purpose-built scoring model; it *is* the app's model.
 
 **Alternatives considered**:
-- *Feed default/placeholder values into `score_market_flow()`* — rejected: would
-  silently present fabricated crypto-microstructure data as if it were a real signal
-  for a stock, violating Constitution Principle V (Live API Integrity) and Principle
-  I (no undefined/faked branches).
-- *Call an external stock-analyst-rating or recommendation API* — rejected: adds a
-  new third-party dependency (and likely an API key requirement) beyond what the
-  user asked for, when the app already has a capable, dependency-free data source
-  (`yfinance`) for the raw inputs needed to score momentum/trend.
-- *New lightweight technical-indicator score computed only from real `yfinance`
-  data, using the app's existing score→threshold→signal pattern* — **selected**:
-  no new dependencies, uses only real fetched data, and stays as consistent with the
-  rest of the app's decision-making style as is technically possible.
+- *Build a new, simplified crypto-specific score (as the stock version had to for
+  equities)* — rejected: unnecessary now that the real scorer is directly usable,
+  and would create two different scoring behaviors for the same coin depending on
+  which page the user is on, which is exactly what FR-005 says not to do.
+- *Call `calculate_score()` directly instead of via `score_from_history()`* —
+  rejected: `score_from_history()` already contains the validated
+  indicator-derivation logic (RSI, ATR, support/resistance, VWAP, volume averages)
+  the scanner relies on; reimplementing that derivation for the lookup path would
+  duplicate logic and risk it drifting out of sync with the scanner over time.
 
-## Decision: Current price retrieval
+## Decision: Current price retrieval and "live" vs. "delayed" labeling
 
-**Decision**: Fetch the ticker's most recent price via `yfinance` (the same library
-`scanner.py` already uses for market data), reading the latest available close from
-its returned history/quote data. If the most recent price is not from the currently
-open trading session (e.g., the market is closed), label it as a last-close price
-per FR-011 rather than presenting it as live.
+**Decision**: Call `storage.py`'s existing `fetch_latest_price(ticker)` directly —
+the same multi-source fallback chain already used elsewhere in the app (Binance spot
+ticker → Yahoo 1-minute history → Yahoo 1-hour `yf.download` fallback → CoinGecko
+simple price). Label the result `"live"` when the Binance spot source answered
+(`quote["source"] == "Binance spot"`), and `"delayed"` for any of the other three
+fallback sources.
 
-**Rationale**: `yfinance` is already a project dependency and already proven to work
-against this exact kind of ticker data in `scanner.py`; introducing a second stock
-data source (e.g., a paid quote API) is unnecessary and out of scope.
+**Rationale**: `fetch_latest_price()` is already exactly "get the current price for a
+crypto ticker, trying the fastest real source first" — no new price-fetch logic is
+needed. Crypto markets trade continuously, so the stock version's "market
+open/closed" framing for FR-011 doesn't apply; what *does* still matter is that a
+user isn't shown a price from a slower, more-stale fallback source as if it were the
+fastest real-time tick. Binance's spot ticker is the freshest of the four sources (a
+live trade price), so "did it come from Binance" is a reasonable, already-observable
+proxy for "live" vs. "delayed."
 
-**Alternatives considered**: The `requests`-based Binance/CoinGecko helpers in
-`storage.py` (`fetch_binance_price`, `fetch_coingecko_price`) were considered for
-consistency, but both are crypto-exchange-specific endpoints and cannot resolve an
-equity ticker like "AAPL" — rejected as inapplicable to this feature's domain.
+**Alternatives considered**: Treat all four sources as equally "live" (drop the
+live/delayed distinction entirely) — rejected: FR-011 (updated for crypto) still
+requires the distinction to be shown when the fastest source wasn't the one that
+answered, and the underlying data-freshness gap between a live Binance tick and a
+CoinGecko "simple price" snapshot is real enough to be worth surfacing.
 
 ## Decision: Distinguishing "ticker not found" from "data source unavailable"
 
-**Decision**: Treat a `yfinance` response with no usable price/history data for the
-submitted symbol as "not found" (FR-007); treat a network error, timeout, or
-unexpected/malformed response as "unavailable" (FR-008). These map to two distinct
-warning messages so the user knows whether the ticker itself was the problem or the
-lookup failed for an unrelated reason.
+**Decision**: A ticker is **not_found** (FR-007) when the whole pipeline runs
+without an unexpected exception but produces no usable data — i.e.,
+`fetch_latest_price()` returns `None` (every source either had no match or failed
+its own internal check) and/or `fetch_market_data([ticker])`'s history is empty.
+A ticker is **unavailable** (FR-008) when an exception propagates out of the lookup
+orchestrator itself — e.g., an unexpected error inside `fetch_market_data()` (rather
+than one of the individually-caught branches inside `fetch_latest_price()`), a
+`market_flow.fetch_market_flow()` failure that raises instead of returning an error
+dict, or any other unhandled error — treated as a safety-net catch-all distinct from
+the normal "no data found for this symbol" path.
 
-**Rationale**: `yfinance` generally does not raise a distinct exception for an
-unknown ticker — it typically returns an empty result — so the "not found" case must
-be detected by validating the response shape/emptiness rather than by catching a
-specific error type. This directly serves Constitution Principle I (no undefined
-branches): both failure shapes must be explicitly checked for, not merged into one
-generic catch-all.
+**Rationale**: `fetch_latest_price()` already swallows individual source failures
+internally (each fallback is wrapped in its own `try/except: return None`), so by
+design it cannot distinguish "invalid symbol" from "this one source is down" — but
+because it tries four independent sources before giving up, a total `None` is a
+reasonably strong signal that the symbol itself isn't recognized, not that
+everything is simultaneously unreachable. This mirrors the same not-found vs.
+unavailable split the stock version used, just re-grounded in real crypto data
+sources instead of a single `yfinance` call. This directly serves Constitution
+Principle I (no undefined branches): both failure shapes are explicitly produced,
+not merged into one generic catch-all.
 
-**Alternatives considered**: A single generic "lookup failed" message for both cases
-— rejected because it's less actionable for the user and the spec's two acceptance
-scenarios (US3, scenarios 1 and 2) explicitly describe them as different messages.
+**Alternatives considered**: Report every failure as a single generic "lookup
+failed" message — rejected for the same reason as in the stock version: less
+actionable, and the spec's US3 acceptance scenarios describe the two cases with
+different messages.
 
-## Decision: Testing framework
+## Decision: Testing framework (unchanged)
 
-**Decision**: Adopt `pytest`.
+**Decision**: Keep `pytest`, adopted during the stock version.
 
-**Rationale**: No test framework exists in the repo today. `pytest` is the de facto
-standard for Python projects and is needed to exercise this feature's required
-failure branches (not-found ticker, unavailable data source, failed history write)
-deterministically and without depending on live network calls in every test run —
-directly supporting the constitution's Zero Loophole Execution principle by making
-every branch verifiable.
+**Rationale**: Still the right tool for the same reason as before — deterministic,
+network-free verification of the recommendation-mapping and not-found/unavailable
+branches. Tests will mock at the `scanner`/`market_flow`/`storage` function
+boundaries (`fetch_latest_price`, `fetch_market_data`, `fetch_market_flow`) instead
+of mocking `yfinance.Ticker` directly, since those are now the actual seams the
+lookup orchestrator calls through.
 
-**Alternatives considered**: `unittest` (Python stdlib, avoids adding a dependency)
-— rejected in favor of `pytest`'s simpler assertion/fixture syntax, which keeps the
-first test suite in this repo approachable for a single maintainer.
+## Decision: Interaction pattern (unchanged)
 
-## Decision: Interaction pattern (loading / re-fetch behavior)
+**Decision**: Keep the client-side `fetch()`-on-submit pattern with an immediate
+loading state and "always re-fetch, replace what's shown" behavior, validated during
+the stock version's implementation.
 
-**Decision**: A client-side `fetch()` call triggered on form submit, showing a
-loading indicator immediately and replacing it with the result or a warning when the
-response arrives — no background polling/threading like the multi-symbol scan uses.
-
-**Rationale**: A single-ticker lookup is one short-lived external call, unlike the
-multi-symbol `scan_market()` flow (which runs in a background thread and is polled
-via `/scan_status` because it can take much longer over many symbols). Matching that
-heavier pattern here would add complexity the spec's scope (SC-002: 5 seconds, one
-ticker at a time) doesn't require. Re-submitting while a lookup is in flight simply
-issues a new `fetch()` and renders whichever response is the latest one requested,
-satisfying the "always re-fetch, replace what's shown" clarification.
-
-**Alternatives considered**: Reusing the existing background-thread + polling
-pattern (`/start_scan` + `/scan_status`) — rejected as unnecessary complexity for a
-single, fast, on-demand request.
+**Rationale**: Nothing about the crypto pivot changes the shape of a single on-demand
+lookup — it's still one short-lived server round trip per submission. No reason to
+revisit a decision that already worked.

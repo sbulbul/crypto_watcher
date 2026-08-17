@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Crypto Ticker Lookup</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<main class="shell">
+    <header class="topbar">
+        <div>
+            <p class="eyebrow">Crypto ticker lookup</p>
+            <h1>Crypto Lookup</h1>
+        </div>
+        <div class="status-pill">Live quote</div>
+    </header>
+
+    <section class="control-panel">
+        <form id="lookupForm">
+            <label for="ticker">Ticker symbol</label>
+            <input id="ticker" type="text" name="ticker" placeholder="e.g. BTC" autocomplete="off">
+            <button id="lookupButton" type="submit">Look Up</button>
+            <a class="reset-button" href="{{ url_for('home') }}">Back to Scanner</a>
+        </form>
+    </section>
+
+    <section id="promptState" class="empty-state compact-empty">
+        <h2>Enter a ticker to get started</h2>
+        <p>Look up a coin's current price and a Buy/Sell/Hold recommendation.</p>
+    </section>
+
+    <section id="loadingState" class="empty-state compact-empty" hidden>
+        <h2>Looking up ticker&hellip;</h2>
+        <p>Fetching the latest price and recommendation.</p>
+    </section>
+
+    <section id="warningState" class="empty-state error-state" hidden>
+        <h2>Lookup issue</h2>
+        <p id="warningText"></p>
+    </section>
+
+    <section id="resultState" class="result-card lookup-result" hidden>
+        <div class="card-main">
+            <div class="ticker-block">
+                <h3 id="resultTicker">-</h3>
+                <span id="resultPriceType" class="signal">-</span>
+            </div>
+            <div id="resultRecommendation" class="recommendation-badge">-</div>
+        </div>
+        <div class="stat-row lookup-stat-row">
+            <div><span>Price</span><strong id="resultPrice">-</strong></div>
+            <div><span>Looked up</span><strong id="resultTime">-</strong></div>
+        </div>
+        <p id="resultSaveWarning" class="save-warning" hidden></p>
+    </section>
+</main>
+
+<script>
+const lookupForm = document.getElementById("lookupForm");
+const tickerInput = document.getElementById("ticker");
+const promptState = document.getElementById("promptState");
+const loadingState = document.getElementById("loadingState");
+const warningState = document.getElementById("warningState");
+const warningText = document.getElementById("warningText");
+const resultState = document.getElementById("resultState");
+const resultTicker = document.getElementById("resultTicker");
+const resultPriceType = document.getElementById("resultPriceType");
+const resultRecommendation = document.getElementById("resultRecommendation");
+const resultPrice = document.getElementById("resultPrice");
+const resultTime = document.getElementById("resultTime");
+const resultSaveWarning = document.getElementById("resultSaveWarning");
+
+let requestSeq = 0;
+
+function hideAllStates() {
+    promptState.hidden = true;
+    loadingState.hidden = true;
+    warningState.hidden = true;
+    resultState.hidden = true;
+}
+
+function showPrompt(message) {
+    hideAllStates();
+    promptState.querySelector("h2").textContent = message || "Enter a ticker to get started";
+    promptState.hidden = false;
+}
+
+function showLoading() {
+    hideAllStates();
+    loadingState.hidden = false;
+}
+
+function showWarning(message) {
+    hideAllStates();
+    warningText.textContent = message;
+    warningState.hidden = false;
+}
+
+function formatPrice(price) {
+    return `$${Number(price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function formatTime(epochSeconds) {
+    return new Date(epochSeconds * 1000).toLocaleString();
+}
+
+function showResult(data) {
+    hideAllStates();
+
+    resultTicker.textContent = data.ticker;
+    resultPriceType.textContent = data.price_type === "delayed" ? "Delayed price" : "Live price";
+    resultPrice.textContent = formatPrice(data.price);
+    resultTime.textContent = formatTime(data.looked_up_at);
+
+    const recommendation = data.recommendation || "Hold";
+    resultRecommendation.textContent = recommendation;
+    resultRecommendation.className = `recommendation-badge ${recommendation.toLowerCase()}`;
+
+    if (data.warning) {
+        resultSaveWarning.textContent = data.warning;
+        resultSaveWarning.hidden = false;
+    } else {
+        resultSaveWarning.hidden = true;
+    }
+
+    resultState.hidden = false;
+}
+
+async function runLookup(ticker) {
+    const seq = ++requestSeq;
+    showLoading();
+
+    let response;
+    try {
+        response = await fetch(`{{ url_for('crypto_lookup_route') }}?ticker=${encodeURIComponent(ticker)}`, {
+            cache: "no-store",
+        });
+    } catch (networkError) {
+        if (seq !== requestSeq) return;
+        showWarning("We couldn't reach the app. Check your connection and try again.");
+        return;
+    }
+
+    let data;
+    try {
+        data = await response.json();
+    } catch (parseError) {
+        if (seq !== requestSeq) return;
+        showWarning("We couldn't reach the market data source. Please try again in a moment.");
+        return;
+    }
+
+    if (seq !== requestSeq) return;
+
+    if (data.status === "ok") {
+        showResult(data);
+    } else {
+        showWarning(data.warning || "The lookup failed. Please try again.");
+    }
+}
+
+lookupForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const ticker = tickerInput.value.trim();
+
+    if (!ticker) {
+        showPrompt("Enter a ticker symbol to look up.");
+        return;
+    }
+
+    runLookup(ticker);
+});
+</script>
+
+</body>
+</html>

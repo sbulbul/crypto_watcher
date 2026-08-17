@@ -1,12 +1,15 @@
-# Feature Specification: Stock Ticker Lookup
+# Feature Specification: Crypto Ticker Lookup
 
 **Feature Branch**: `001-stock-ticker-lookup`
+<!-- Directory/branch slug intentionally unchanged from its original "stock" name after
+     the 2026-08-17 pivot below — Spec Kit feature slugs are stable identifiers, not
+     living documentation. The content throughout this spec describes crypto only. -->
 
 **Created**: 2026-08-17
 
 **Status**: Draft
 
-**Input**: User description: "Build a page where users enter a stock ticker and see its current price and a buy/sell recommendation. I should navigate to this page with a button on main page."
+**Input**: User description: "Build a page where users enter a crypto ticker and see its current price and a buy/sell recommendation. I should navigate to this page with a button on main page." (Pivoted from an original "stock ticker" input — see Clarifications.)
 
 ## Clarifications
 
@@ -15,18 +18,29 @@
 - Q: Should a ticker lookup result (ticker, price, recommendation, timestamp) be saved anywhere, or is it purely shown on screen and discarded when the user leaves or looks up another ticker? → A: Save a lookup history — each completed lookup is persisted so it survives across sessions.
 - Q: If the user submits the same ticker again while a previous lookup for it is still loading (or right after it just finished), what should happen? → A: Always re-fetch — every submission triggers a fresh lookup, replacing whatever is currently shown or loading.
 
+### Session 2026-08-17 (pivot)
+
+- Decision: This feature was re-scoped from stock (equity) tickers to cryptocurrency
+  tickers, at the user's explicit request, replacing the equity version rather than
+  adding a second feature. Reason: this app (`crypto_watcher`) already has full crypto
+  evaluation infrastructure (Binance order-book/funding data, the existing buy/sell
+  scorer) that stocks could never actually use — see `research.md` for what this
+  unlocks. All user stories, functional requirements, and success criteria below are
+  unchanged in structure from the original stock version; only the asset class and the
+  two crypto-specific adjustments called out in FR-005 and FR-011 changed.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Look up a ticker's price and recommendation (Priority: P1)
 
-A user enters a stock ticker symbol and sees that stock's current price along with a
-Buy/Sell/Hold recommendation, so they can quickly decide what to do with that stock.
+A user enters a cryptocurrency ticker symbol and sees that coin's current price along
+with a Buy/Sell/Hold recommendation, so they can quickly decide what to do with it.
 
 **Why this priority**: This is the entire value of the feature — without it there is
 nothing to navigate to. It must work standalone before anything else matters.
 
 **Independent Test**: Can be fully tested by opening the lookup page directly, entering
-a known valid ticker (e.g., "AAPL"), and confirming a current price and a Buy/Sell/Hold
+a known valid ticker (e.g., "BTC"), and confirming a current price and a Buy/Sell/Hold
 recommendation are both displayed.
 
 **Acceptance Scenarios**:
@@ -92,8 +106,10 @@ recommendation.
 ### Edge Cases
 
 - What happens when the user enters a ticker symbol that doesn't exist or is misspelled?
-- What happens when the market is closed and there is no "live" price available — is
-  the most recent close shown, and is it labeled as such?
+- What happens when the fastest (real-time) price source is unavailable and the system
+  has to fall back to a source with more lag — is that distinction shown to the user
+  rather than presented as an equally live price? (Crypto markets trade continuously,
+  so there is no "market closed" case the way there would be for stocks — see FR-011.)
 - What happens when the price/recommendation data source is slow, unreachable, or
   returns an error?
 - When the user submits the same ticker again while a previous lookup is still in
@@ -110,15 +126,16 @@ recommendation.
 
 - **FR-001**: The main page MUST display a clearly labeled button that navigates the
   user to the ticker lookup page.
-- **FR-002**: The ticker lookup page MUST provide a way for the user to enter a stock
-  ticker symbol and submit it.
+- **FR-002**: The ticker lookup page MUST provide a way for the user to enter a
+  cryptocurrency ticker symbol and submit it.
 - **FR-003**: Upon submitting a valid ticker, the system MUST retrieve and display that
   ticker's current price.
 - **FR-004**: Upon submitting a valid ticker, the system MUST display a Buy, Sell, or
   Hold recommendation alongside the price.
 - **FR-005**: The recommendation MUST be produced using the same evaluation criteria the
-  system already applies to stocks elsewhere in the app, so recommendations are
-  consistent regardless of where in the app a user sees them.
+  system already applies to coins elsewhere in the app (the same buy/sell scoring the
+  scanner uses), so recommendations are consistent regardless of where in the app a
+  user sees them.
 - **FR-006**: While a lookup is in progress, the system MUST show the user a clear
   indication that the lookup is running, until it completes or fails.
 - **FR-007**: If the submitted ticker does not exist or is not recognized, the system
@@ -135,14 +152,17 @@ recommendation.
   progress, the system MUST start the new lookup immediately and its result (or
   warning) MUST replace whatever was previously shown or loading, rather than
   queuing or blocking the new submission.
-- **FR-011**: If the displayed price is not from the current live trading session (for
-  example, because the market is closed), the system MUST clearly label it as such
-  (e.g., as a "last close" price) rather than presenting it as live.
+- **FR-011**: If the displayed price did not come from the fastest real-time source
+  (for example, because the primary live price source was unavailable and the system
+  fell back to a source with more lag), the system MUST clearly label it as such (e.g.,
+  as a "delayed" price) rather than presenting it as equally live. Crypto markets trade
+  continuously, so this reflects data-source freshness rather than a market being open
+  or closed.
 - **FR-012**: The ticker lookup page MUST display the ticker, price, recommendation, and
   any warning message fully, without any text overlapping or being cut off, regardless
   of the length of the values shown.
 - **FR-013**: The system MUST persist every completed lookup (ticker, price, whether
-  that price was live or last-close, recommendation, and timestamp) to a lookup
+  that price was live or delayed, recommendation, and timestamp) to a lookup
   history that survives across app restarts and sessions.
 - **FR-014**: If saving a completed lookup to history fails, the system MUST show a
   visible warning that the result may not be saved, rather than silently discarding it
@@ -151,9 +171,9 @@ recommendation.
 ### Key Entities
 
 - **Ticker Lookup Result**: Represents the outcome of one lookup — the ticker symbol
-  the user entered, the current (or last-close) price returned, whether that price is
-  live or last-close, the Buy/Sell/Hold recommendation, and the time the lookup was
-  performed. Each result is persisted as an entry in the user's lookup history.
+  the user entered, the current price returned, whether that price is live or delayed,
+  the Buy/Sell/Hold recommendation, and the time the lookup was performed. Each result
+  is persisted as an entry in the user's lookup history.
 
 ## Success Criteria *(mandatory)*
 
@@ -172,13 +192,13 @@ recommendation.
 
 ## Assumptions
 
-- "Stock ticker" refers to equity ticker symbols only; other asset types (e.g.,
-  cryptocurrency symbols) are out of scope for this feature.
+- "Ticker" refers to cryptocurrency ticker symbols only (matching the rest of this
+  app); other asset types (e.g., stocks) are out of scope for this feature.
 - The recommendation is a simple three-way label (Buy / Sell / Hold) rather than a
   numeric score, matching how the app communicates decisions elsewhere.
-- The recommendation is generated using whatever evaluation logic the app already uses
-  for other stocks it analyzes; this feature only needs to expose that recommendation
-  for a single, user-specified ticker on demand.
+- The recommendation is generated using the same buy/sell scoring the app already runs
+  for other coins it scans; this feature only needs to run that same scoring for a
+  single, user-specified ticker on demand.
 - A lookup is a single on-demand fetch triggered by the user submitting a ticker; the
   price and recommendation do not automatically refresh in the background while the
   page is open.
